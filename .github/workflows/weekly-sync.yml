@@ -1,0 +1,58 @@
+name: Weekly Sync to Google Sheets
+
+on:
+  schedule:
+    # Ogni lunedì alle 02:00 UTC (03:00 ora italiana)
+    - cron: '0 2 * * 1'
+
+  # Permette esecuzione manuale dal tab Actions
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install requests gspread google-auth pandas
+
+      - name: Create Google credentials file
+        run: |
+          echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT }}' > /tmp/google-credentials.json
+
+      - name: Run Meta Campaign sync
+        env:
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          META_AD_ACCOUNT_ID: ${{ secrets.META_AD_ACCOUNT_ID }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/google-credentials.json
+        run: python meta_to_sheets.py
+
+      - name: Run Meta Ads sync
+        env:
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          META_AD_ACCOUNT_ID: ${{ secrets.META_AD_ACCOUNT_ID }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/google-credentials.json
+        run: python meta_ads_to_sheets.py
+
+      - name: Run HubSpot sync
+        env:
+          HUBSPOT_TOKEN: ${{ secrets.HUBSPOT_TOKEN }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/google-credentials.json
+        run: python hubspot_to_sheets.py
+
+      - name: Cleanup credentials
+        if: always()
+        run: rm -f /tmp/google-credentials.json
