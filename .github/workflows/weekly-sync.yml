@@ -30,7 +30,7 @@ jobs:
         env:
           GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
         run: |
-          echo "$GOOGLE_SERVICE_ACCOUNT" > /tmp/google-credentials.json
+          printenv GOOGLE_SERVICE_ACCOUNT > /tmp/google-credentials.json
 
       - name: Run Meta Campaign sync
         env:
