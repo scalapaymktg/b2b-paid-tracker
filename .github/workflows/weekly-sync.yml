@@ -2,8 +2,8 @@ name: Weekly Sync to Google Sheets
 
 on:
   schedule:
-    # Ogni lunedì alle 02:00 UTC (03:00 ora italiana)
-    - cron: '0 2 * * 1'
+    # Ogni lunedì alle 07:30 CET = 06:30 UTC
+    - cron: '30 6 * * 1'
 
   # Permette esecuzione manuale dal tab Actions
   workflow_dispatch:
@@ -24,7 +24,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install requests gspread google-auth pandas
+          pip install requests gspread google-auth google-ads google-api-python-client pandas
 
       - name: Create Google credentials file
         run: |
@@ -46,12 +46,33 @@ jobs:
           GOOGLE_APPLICATION_CREDENTIALS: /tmp/google-credentials.json
         run: python meta_ads_to_sheets.py
 
+      - name: Run Google Ads sync
+        env:
+          GOOGLE_ADS_CLIENT_ID: ${{ secrets.GOOGLE_ADS_CLIENT_ID }}
+          GOOGLE_ADS_CLIENT_SECRET: ${{ secrets.GOOGLE_ADS_CLIENT_SECRET }}
+          GOOGLE_ADS_REFRESH_TOKEN: ${{ secrets.GOOGLE_ADS_REFRESH_TOKEN }}
+          GOOGLE_ADS_DEVELOPER_TOKEN: ${{ secrets.GOOGLE_ADS_DEVELOPER_TOKEN }}
+          GOOGLE_ADS_MANAGER_CUSTOMER_ID: ${{ secrets.GOOGLE_ADS_MANAGER_CUSTOMER_ID }}
+          GOOGLE_ADS_CUSTOMER_ID: ${{ secrets.GOOGLE_ADS_CUSTOMER_ID }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/google-credentials.json
+        run: python google_ads_to_sheets.py
+
       - name: Run HubSpot sync
         env:
           HUBSPOT_TOKEN: ${{ secrets.HUBSPOT_TOKEN }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           GOOGLE_APPLICATION_CREDENTIALS: /tmp/google-credentials.json
         run: python hubspot_to_sheets.py
+
+      - name: Run Brand Auction sync (Gmail report)
+        env:
+          GOOGLE_ADS_CLIENT_ID: ${{ secrets.GOOGLE_ADS_CLIENT_ID }}
+          GOOGLE_ADS_CLIENT_SECRET: ${{ secrets.GOOGLE_ADS_CLIENT_SECRET }}
+          GOOGLE_GMAIL_REFRESH_TOKEN: ${{ secrets.GOOGLE_GMAIL_REFRESH_TOKEN }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/google-credentials.json
+        run: python brand_auction_to_sheets.py
 
       - name: Cleanup credentials
         if: always()

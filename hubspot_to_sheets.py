@@ -89,22 +89,92 @@ STAGE_MAP = {
     "363503572": "Terminated"
 }
 
-# Column mapping: HubSpot property -> Sheet column name
+def get_common_prefix_length(str1, str2):
+    """Returns the length of the common prefix between two strings."""
+    if not str1 or not str2:
+        return 0
+    min_len = min(len(str1), len(str2))
+    for i in range(min_len):
+        if str1[i] != str2[i]:
+            return i
+    return min_len
+
+
+def find_best_match(utm_campaign, campaigns, min_prefix_length=10):
+    """Find the campaign with the longest common prefix (fuzzy matching)."""
+    if not utm_campaign or utm_campaign == "(No value)" or utm_campaign.startswith("{{"):
+        return ""
+
+    best_match = ""
+    best_prefix_len = 0
+
+    for campaign in campaigns:
+        prefix_len = get_common_prefix_length(utm_campaign, campaign)
+        if prefix_len > best_prefix_len:
+            best_prefix_len = prefix_len
+            best_match = campaign
+
+    # Only return match if common prefix is long enough
+    if best_prefix_len >= min_prefix_length:
+        return best_match
+    return ""
+
+
+def find_matching_meta_campaign(utm_campaign, meta_campaigns):
+    """Find the best matching Meta campaign using fuzzy prefix logic."""
+    return find_best_match(utm_campaign, meta_campaigns)
+
+
+def load_meta_campaigns(gc, spreadsheet_id):
+    """Load unique Meta campaign names from the Meta API Test sheet"""
+    try:
+        spreadsheet = gc.open_by_key(spreadsheet_id)
+        meta_sheet = spreadsheet.worksheet("Meta API Test")
+        data = meta_sheet.get("A2:A")  # Column A = Campaign name
+        campaigns = list(set([row[0] for row in data if row and row[0]]))
+        return campaigns
+    except Exception as e:
+        print(f"  Warning: Could not load Meta campaigns: {e}")
+        return []
+
+
+def find_matching_google_campaign(utm_campaign, google_campaigns):
+    """Find the best matching Google Ads campaign using fuzzy prefix logic."""
+    return find_best_match(utm_campaign, google_campaigns)
+
+
+def load_google_campaigns(gc, spreadsheet_id):
+    """Load unique Google Ads campaign names from the Google Ads API Test sheet"""
+    try:
+        spreadsheet = gc.open_by_key(spreadsheet_id)
+        google_sheet = spreadsheet.worksheet("Google Ads API Test")
+        data = google_sheet.get("B2:B")  # Column B = Campaign
+        campaigns = list(set([row[0] for row in data if row and row[0]]))
+        return campaigns
+    except Exception as e:
+        print(f"  Warning: Could not load Google Ads campaigns: {e}")
+        return []
+
+
+# Column mapping: HubSpot property -> Sheet column name (16 columns: A-P)
+# Column Q = Matched Campaign (searches both Meta and Google Ads), R+ contains dynamic formulas
 COLUMN_MAPPING = {
-    "deal_qualification_date": "Deal qualification date",
-    "legal_entity_country_region": "Legal Entity - Country/Region",
-    "amount": "Amount",
-    "ttv_all_time": "TTV All Time",
-    "conversion_touch__utm_medium": "Conversion Touch: UTM Medium",
-    "conversion_touch__utm_source": "Conversion Touch: UTM Source",
-    "conversion_touch__utm_content": "Conversion Touch: UTM Content",
-    "conversion_touch__utm_campaign": "Conversion Touch: UTM Campaign",
-    "conversion_touch__referral_source": "Conversion Touch: Referral Source",
-    "conversion_touch__aggregate_source": "Conversion Touch: Aggregate Source",
-    "store_type": "Store type",
-    "pipeline": "Pipeline",
-    "dealstage": "Deal Stage",
-    "hs_object_id": "Deal ID"
+    "deal_qualification_date": "Deal qualification date",                    # A
+    "legal_entity_country_region": "Legal Entity - Country/Region",          # B
+    "amount": "Amount",                                                       # C
+    "ttv_all_time": "TTV All Time",                                          # D
+    "conversion_touch__utm_medium": "Conversion Touch: UTM Medium",          # E
+    "conversion_touch__utm_source": "Conversion Touch: UTM Source",          # F
+    "conversion_touch__utm_content": "Conversion Touch: UTM Content",        # G
+    "conversion_touch__utm_campaign": "Conversion Touch: UTM Campaign",      # H
+    "conversion_touch__referral_source": "Conversion Touch: Referral Source", # I
+    "conversion_touch__aggregate_source": "Conversion Touch: Aggregate Source", # J
+    "store_type": "Store type",                                              # K
+    "pipeline": "Pipeline",                                                  # L
+    "dealstage": "Deal Stage",                                               # M
+    "hs_object_id": "Deal ID",                                               # N
+    "hs_date_entered_720800761": "Date entered KYC Pending Approval (Marketing)", # O
+    "hs_date_entered_184220904": "Date entered Onboarding Initiated (Sales)"      # P
 }
 
 
@@ -190,14 +260,15 @@ def fetch_all_deals(start_ts, end_ts):
     return all_results
 
 
-def process_deals(deals):
-    """Process deals into rows for Google Sheets"""
-    headers = list(COLUMN_MAPPING.values())
+def process_deals(deals, meta_campaigns, google_campaigns):
+    """Process deals into rows for Google Sheets (columns A:Q, R+ has formulas)"""
+    headers = list(COLUMN_MAPPING.values()) + ["Matched Campaign"]  # 17 columns: A-Q
     rows = []
 
     for deal in deals:
         props = deal.get("properties", {})
         row = []
+        utm_campaign = ""
         for prop_name in COLUMN_MAPPING.keys():
             value = props.get(prop_name, "")
             if value is None:
@@ -211,7 +282,22 @@ def process_deals(deals):
             if prop_name == "dealstage" and value in STAGE_MAP:
                 value = STAGE_MAP[value]
 
+            # Capture UTM Campaign for matching
+            if prop_name == "conversion_touch__utm_campaign":
+                utm_campaign = value
+
             row.append(value)
+
+        # Find best match from Meta or Google Ads (column Q)
+        matched_meta = find_matching_meta_campaign(utm_campaign, meta_campaigns)
+        matched_google = find_matching_google_campaign(utm_campaign, google_campaigns)
+        # Pick the longest match (most specific)
+        if matched_meta and matched_google:
+            matched_campaign = matched_meta if len(matched_meta) >= len(matched_google) else matched_google
+        else:
+            matched_campaign = matched_meta or matched_google
+        row.append(matched_campaign)
+
         rows.append(row)
 
     # Sort by deal_qualification_date
@@ -249,18 +335,26 @@ def apply_formatting(spreadsheet, worksheet):
 
 
 def update_google_sheets(headers, rows):
-    """Update Google Sheets with data"""
+    """Update Google Sheets with data - ONLY columns A:Q, preserving R+ (formulas)"""
     creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
     gc = gspread.authorize(creds)
     spreadsheet = gc.open_by_key(SPREADSHEET_ID)
 
     try:
         worksheet = spreadsheet.worksheet(SHEET_NAME)
-        worksheet.clear()
+        # Clear ONLY columns A:Q (17 columns), not the entire sheet
+        # This preserves formulas in column R onwards
+        current_row_count = worksheet.row_count
+        if current_row_count > 0:
+            # Clear columns A:Q by writing empty values
+            empty_range = [[""] * 17 for _ in range(current_row_count)]
+            worksheet.update(range_name='A1:Q' + str(current_row_count), values=empty_range)
     except gspread.exceptions.WorksheetNotFound:
-        worksheet = spreadsheet.add_worksheet(title=SHEET_NAME, rows=1000, cols=20)
+        worksheet = spreadsheet.add_worksheet(title=SHEET_NAME, rows=1000, cols=30)
 
-    worksheet.update(range_name='A1', values=[headers] + rows)
+    # Write new data to columns A:Q only
+    all_data = [headers] + rows
+    worksheet.update(range_name='A1:Q' + str(len(all_data)), values=all_data)
     apply_formatting(spreadsheet, worksheet)
 
     return len(rows)
@@ -281,8 +375,16 @@ def main():
         print("  No deals found for this period")
         return
 
-    # Process data
-    headers, rows = process_deals(deals)
+    # Load campaigns for matching
+    creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+    gspread_client = gspread.authorize(creds)
+    meta_campaigns = load_meta_campaigns(gspread_client, SPREADSHEET_ID)
+    print(f"  Loaded {len(meta_campaigns)} unique Meta campaigns for matching")
+    google_campaigns = load_google_campaigns(gspread_client, SPREADSHEET_ID)
+    print(f"  Loaded {len(google_campaigns)} unique Google Ads campaigns for matching")
+
+    # Process deals (columns A:Q, R+ has formulas in sheet)
+    headers, rows = process_deals(deals, meta_campaigns, google_campaigns)
 
     # Update Google Sheets
     row_count = update_google_sheets(headers, rows)
