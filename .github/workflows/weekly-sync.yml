@@ -27,8 +27,10 @@ jobs:
           pip install requests gspread google-auth google-ads google-api-python-client pandas
 
       - name: Create Google credentials file
+        env:
+          GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
         run: |
-          echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT }}' > /tmp/google-credentials.json
+          echo "$GOOGLE_SERVICE_ACCOUNT" > /tmp/google-credentials.json
 
       - name: Run Meta Campaign sync
         env:
