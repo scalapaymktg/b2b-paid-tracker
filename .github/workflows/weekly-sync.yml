@@ -30,9 +30,7 @@ jobs:
         env:
           GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
         run: |
-          # Handle both raw JSON and escaped newline formats
-          echo "$GOOGLE_SERVICE_ACCOUNT" | sed 's/\\n/\n/g' > /tmp/google-credentials.json
-          # Debug: show file size and validate JSON
+          echo "$GOOGLE_SERVICE_ACCOUNT" > /tmp/google-credentials.json
           echo "Credentials file size: $(wc -c < /tmp/google-credentials.json) bytes"
           python -c "import json; json.load(open('/tmp/google-credentials.json')); print('JSON validation: OK')"
 
